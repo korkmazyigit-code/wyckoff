@@ -145,24 +145,27 @@ if st.sidebar.button("💾 Ayarları Kaydet", use_container_width=True):
     st.sidebar.success("Kaydedildi ✓")
 
 # ─── FONKSİYONLAR ──────────────────────────────────────────
-PERIYOT_MAP = {"1m":"1","5m":"5","15m":"15","1h":"60","4h":"240","1d":"D","1w":"W"}
+YF_PERIYOT  = {"1m":"1m","5m":"5m","15m":"15m","1h":"1h","4h":"1h","1d":"1d","1w":"1wk"}
+YF_PERIOD   = {"1m":"1d","5m":"5d","15m":"5d","1h":"60d","4h":"60d","1d":"2y","1w":"5y"}
+
+def sembol_yf(sembol):
+    base = sembol.split("/")[0]
+    return f"{base}-USD"
 
 @st.cache_data(ttl=60)
 def veri_cek(sembol, periyot, limit):
-    import requests
-    symbol = sembol.replace("/", "")
-    interval = PERIYOT_MAP.get(periyot, "60")
-    url = "https://api.bybit.com/v5/market/kline"
-    params = {"category": "linear", "symbol": symbol, "interval": interval, "limit": limit}
-    r = requests.get(url, params=params, timeout=10)
-    r.raise_for_status()
-    data = r.json()
-    rows = data["result"]["list"]
-    rows = sorted(rows, key=lambda x: int(x[0]))
-    df = pd.DataFrame(rows, columns=["timestamp","open","high","low","close","volume","turnover"])
-    df = df[["timestamp","open","high","low","close","volume"]].astype(float)
-    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
-    df.set_index("timestamp", inplace=True)
+    import yfinance as yf
+    ticker   = sembol_yf(sembol)
+    interval = YF_PERIYOT.get(periyot, "1h")
+    period   = YF_PERIOD.get(periyot, "60d")
+    df = yf.download(ticker, period=period, interval=interval,
+                     auto_adjust=True, progress=False)
+    if df.empty:
+        raise ValueError(f"{sembol} için veri alınamadı")
+    df.columns = [c[0].lower() if isinstance(c, tuple) else c.lower() for c in df.columns]
+    df = df[["open","high","low","close","volume"]].tail(limit)
+    if periyot == "4h":
+        df = df.resample("4h").agg({"open":"first","high":"max","low":"min","close":"last","volume":"sum"}).dropna()
     return df
 
 def pivot_high(high, length):
