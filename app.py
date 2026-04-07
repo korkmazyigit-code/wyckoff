@@ -145,17 +145,21 @@ if st.sidebar.button("💾 Ayarları Kaydet", use_container_width=True):
     st.sidebar.success("Kaydedildi ✓")
 
 # ─── FONKSİYONLAR ──────────────────────────────────────────
-YF_PERIYOT  = {"1m":"1m","5m":"5m","15m":"15m","1h":"1h","4h":"1h","1d":"1d","1w":"1wk"}
-YF_PERIOD   = {"1m":"1d","5m":"5d","15m":"5d","1h":"60d","4h":"60d","1d":"2y","1w":"5y"}
+YF_PERIYOT = {"1m":"1m","5m":"5m","15m":"15m","1h":"1h","4h":"1h","1d":"1d","1w":"1wk"}
+YF_PERIOD  = {"1m":"1d","5m":"5d","15m":"5d","1h":"60d","4h":"60d","1d":"2y","1w":"5y"}
 
-def sembol_yf(sembol):
-    base = sembol.split("/")[0]
-    return f"{base}-USD"
+def _binance(sembol, periyot, limit):
+    exchange = ccxt.binance({"options": {"defaultType": "future"}})
+    ohlcv = exchange.fetch_ohlcv(sembol, periyot, limit=limit)
+    df = pd.DataFrame(ohlcv, columns=["timestamp","open","high","low","close","volume"])
+    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+    df.set_index("timestamp", inplace=True)
+    return df
 
-@st.cache_data(ttl=60)
-def veri_cek(sembol, periyot, limit):
+def _yfinance(sembol, periyot, limit):
     import yfinance as yf
-    ticker   = sembol_yf(sembol)
+    base     = sembol.split("/")[0]
+    ticker   = f"{base}-USD"
     interval = YF_PERIYOT.get(periyot, "1h")
     period   = YF_PERIOD.get(periyot, "60d")
     df = yf.download(ticker, period=period, interval=interval,
@@ -165,8 +169,16 @@ def veri_cek(sembol, periyot, limit):
     df.columns = [c[0].lower() if isinstance(c, tuple) else c.lower() for c in df.columns]
     df = df[["open","high","low","close","volume"]].tail(limit)
     if periyot == "4h":
-        df = df.resample("4h").agg({"open":"first","high":"max","low":"min","close":"last","volume":"sum"}).dropna()
+        df = df.resample("4h").agg({"open":"first","high":"max",
+                                    "low":"min","close":"last","volume":"sum"}).dropna()
     return df
+
+@st.cache_data(ttl=60)
+def veri_cek(sembol, periyot, limit):
+    try:
+        return _binance(sembol, periyot, limit)
+    except Exception:
+        return _yfinance(sembol, periyot, limit)
 
 def pivot_high(high, length):
     pivots = [None] * len(high)
