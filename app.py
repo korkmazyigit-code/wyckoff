@@ -147,7 +147,7 @@ if st.sidebar.button("💾 Ayarları Kaydet", use_container_width=True):
 # ─── FONKSİYONLAR ──────────────────────────────────────────
 @st.cache_data(ttl=60)
 def veri_cek(sembol, periyot, limit):
-    exchange = ccxt.binance({"options": {"defaultType": "future"}})
+    exchange = ccxt.bybit({"options": {"defaultType": "linear"}})
     ohlcv = exchange.fetch_ohlcv(sembol, periyot, limit=limit)
     df = pd.DataFrame(ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
     df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
