@@ -364,6 +364,7 @@ with tab1:
                 st.session_state.scan_results.append({
                     "sembol": sembol, "sinyal": "hata", "fiyat": 0,
                     "bars_ago": None, "df": None, "sinyaller": [],
+                    "hata_msg": str(e),
                 })
         progress.empty()
         st.session_state.scanning = False
@@ -403,7 +404,7 @@ with tab1:
         for r in st.session_state.scan_results:
             if r["sinyal"] == "spring":      sinyal_str = "▲ SPRING"
             elif r["sinyal"] == "upthrust":  sinyal_str = "▼ UPTHRUST"
-            elif r["sinyal"] == "hata":      sinyal_str = "HATA"
+            elif r["sinyal"] == "hata":      sinyal_str = f"HATA: {r.get('hata_msg','')[:60]}"
             else:                            sinyal_str = "—"
             tablo.append({
                 "Sembol":      r["sembol"],
