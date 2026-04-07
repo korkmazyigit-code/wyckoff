@@ -145,11 +145,22 @@ if st.sidebar.button("💾 Ayarları Kaydet", use_container_width=True):
     st.sidebar.success("Kaydedildi ✓")
 
 # ─── FONKSİYONLAR ──────────────────────────────────────────
+PERIYOT_MAP = {"1m":"1","5m":"5","15m":"15","1h":"60","4h":"240","1d":"D","1w":"W"}
+
 @st.cache_data(ttl=60)
 def veri_cek(sembol, periyot, limit):
-    exchange = ccxt.bybit({"options": {"defaultType": "linear"}})
-    ohlcv = exchange.fetch_ohlcv(sembol, periyot, limit=limit)
-    df = pd.DataFrame(ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
+    import requests
+    symbol = sembol.replace("/", "")
+    interval = PERIYOT_MAP.get(periyot, "60")
+    url = "https://api.bybit.com/v5/market/kline"
+    params = {"category": "linear", "symbol": symbol, "interval": interval, "limit": limit}
+    r = requests.get(url, params=params, timeout=10)
+    r.raise_for_status()
+    data = r.json()
+    rows = data["result"]["list"]
+    rows = sorted(rows, key=lambda x: int(x[0]))
+    df = pd.DataFrame(rows, columns=["timestamp","open","high","low","close","volume","turnover"])
+    df = df[["timestamp","open","high","low","close","volume"]].astype(float)
     df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
     df.set_index("timestamp", inplace=True)
     return df
