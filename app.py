@@ -389,7 +389,6 @@ def grafik_ciz(sembol, df, sinyaller, periyot):
         borderpad=3,
         xanchor="left",
         yanchor="middle",
-        cliponaxis=False,
     )
 
     fig.update_layout(
