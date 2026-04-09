@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import ccxt
 import pandas as pd
 import plotly.graph_objects as go
@@ -21,7 +22,6 @@ button[kind="header"]                { display: none !important; }
     0%   { left: -30px; }
     100% { left: 100%; }
 }
-/* Animasyon barı — butonun üst kısmı */
 .runner-top {
     background: #1a3a5c;
     border: 1px solid #2d5a8e;
@@ -39,7 +39,6 @@ button[kind="header"]                { display: none !important; }
     pointer-events: none;
     animation: slideRight 2.7s linear infinite;
 }
-/* Durdur butonu — alt kısım, üst köşeler düz */
 div[data-testid="stButton"] > button[kind="secondary"] {
     border-radius: 0 0 8px 8px !important;
     border-top: none !important;
@@ -69,28 +68,35 @@ DOT/USDT
 LINK/USDT"""
 
 VARSAYILAN = {
-    "semboller_text": VARSAYILAN_SEMBOLLER,
-    "periyot":       "1h",
-    "pivot_len":     7,
-    "lookback":      20,
-    "tolerans":      2.0,
-    "min_height":    3.5,
-    "max_depth":     15.0,
-    "min_bars":      3,
-    "limit":         200,
+    "semboller_text":   VARSAYILAN_SEMBOLLER,
+    "periyot":          "1h",
+    "pivot_window":     3,
+    "max_bars_between": 50,
+    "max_bars_signal":  25,
+    "trend_lookback":   60,
+    "min_trend_drop":   15.0,
+    "body_pct":         0.4,
+    "min_signal_gap":   30,
+    "limit":            600,
 }
 
 def ayar_yukle():
     if os.path.exists(AYAR_DOSYASI):
         with open(AYAR_DOSYASI, "r", encoding="utf-8") as f:
-            return {**VARSAYILAN, **json.load(f)}
+            d = json.load(f)
+            return {**VARSAYILAN, **{k: v for k, v in d.items() if k in VARSAYILAN}}
     return VARSAYILAN.copy()
 
 def ayar_kaydet(ayarlar):
-    with open(AYAR_DOSYASI, "w", encoding="utf-8") as f:
-        json.dump(ayarlar, f, indent=2, ensure_ascii=False)
+    try:
+        with open(AYAR_DOSYASI, "w", encoding="utf-8") as f:
+            json.dump(ayarlar, f, indent=2, ensure_ascii=False)
+    except OSError:
+        pass  # Streamlit Cloud'da dosya sistemi read-only, sessizce geç
 
 ayarlar = ayar_yukle()
+
+PERIYOT_LISTESI = ["1m", "5m", "15m", "1h", "4h", "1d", "1w"]
 
 # ─── SESSION STATE ─────────────────────────────────────────
 for k, v in [
@@ -99,10 +105,14 @@ for k, v in [
     ("scan_results",           []),
     ("selected_symbol",        None),
     ("show_chart_in_screener", False),
+    ("grafik_gosteriliyor",    False),
 ]:
     if k not in st.session_state:
         st.session_state[k] = v
 
+# Periyot: ayarlardan başlat, widget key ile yönetilir
+if "periyot_select" not in st.session_state:
+    st.session_state["periyot_select"] = ayarlar.get("periyot", "1h")
 
 # ─── SIDEBAR ───────────────────────────────────────────────
 st.sidebar.title("⚙️ Ayarlar")
@@ -110,37 +120,44 @@ st.sidebar.title("⚙️ Ayarlar")
 sembol_text = st.sidebar.text_area(
     "Semboller (her satıra bir tane)",
     value=ayarlar.get("semboller_text", VARSAYILAN_SEMBOLLER),
-    height=260,
+    height=180,
 )
-SEMBOLLER = [s.strip().upper() for s in sembol_text.strip().splitlines() if s.strip()]
+all_semboller = [s.strip().upper() for s in sembol_text.strip().splitlines() if s.strip()]
 
-PERIYOT_LISTESI = ["1m", "5m", "15m", "1h", "4h", "1d", "1w"]
-PERIYOT = st.sidebar.selectbox(
-    "Periyot", PERIYOT_LISTESI,
-    index=PERIYOT_LISTESI.index(ayarlar.get("periyot", "1h"))
-)
+# Yeni eklenen semboller için checkbox state başlat (varsayılan: seçili)
+for sym in all_semboller:
+    if f"cb_{sym}" not in st.session_state:
+        st.session_state[f"cb_{sym}"] = True
+
+st.sidebar.markdown("**Taranacak semboller:**")
+SEMBOLLER = []
+for sym in all_semboller:
+    if st.sidebar.checkbox(sym, key=f"cb_{sym}"):
+        SEMBOLLER.append(sym)
 
 with st.sidebar.expander("🔧 Parametreler"):
-    PIVOT_LEN      = st.slider("Pivot uzunluğu",        3,   20,   ayarlar["pivot_len"])
-    LOOKBACK       = st.slider("Lookback (bar)",         5,   100,  ayarlar["lookback"])
-    TOLERANS_PCT   = st.slider("Tolerans %",             0.5, 5.0,  ayarlar["tolerans"],   0.5)
-    MIN_HEIGHT_ATR = st.slider("Min. yükseklik (ATR)",   0.5, 10.0, ayarlar["min_height"], 0.5)
-    MAX_DEPTH_PCT  = st.slider("Max. derinlik %",        1.0, 30.0, ayarlar["max_depth"],  1.0)
-    MIN_BARS       = st.slider("Min. bar arası",         1,   20,   ayarlar["min_bars"])
-    LIMIT          = st.slider("Bar sayısı",             100, 1000, ayarlar["limit"],      50)
+    PIVOT_WINDOW     = st.slider("Pivot penceresi (bar)",     2,  15,  ayarlar.get("pivot_window", 5))
+    MAX_BARS_BETWEEN = st.slider("Max. bar (dip arası)",     5,  80,  ayarlar["max_bars_between"])
+    MAX_BARS_SIGNAL  = st.slider("Max. bar (breakout'a)",    1,  30,  ayarlar["max_bars_signal"])
+    TREND_LOOKBACK   = st.slider("Trend lookback (bar)",     10, 100, ayarlar["trend_lookback"])
+    MIN_TREND_DROP   = st.slider("Min. trend düşüş %",       2.0, 40.0, ayarlar["min_trend_drop"], 0.5)
+    BODY_PCT         = st.slider("Breakout gövde oranı",     0.2, 0.9, ayarlar["body_pct"], 0.05)
+    MIN_SIGNAL_GAP   = st.slider("Min. sinyal arası (bar)",  5,  50,  ayarlar["min_signal_gap"])
+    LIMIT            = st.slider("Bar sayısı",               100, 1500, ayarlar["limit"], 50)
 
 st.sidebar.markdown("---")
 if st.sidebar.button("💾 Ayarları Kaydet", use_container_width=True):
     ayar_kaydet({
-        "semboller_text": sembol_text,
-        "periyot":    PERIYOT,
-        "pivot_len":  PIVOT_LEN,
-        "lookback":   LOOKBACK,
-        "tolerans":   TOLERANS_PCT,
-        "min_height": MIN_HEIGHT_ATR,
-        "max_depth":  MAX_DEPTH_PCT,
-        "min_bars":   MIN_BARS,
-        "limit":      LIMIT,
+        "semboller_text":   sembol_text,
+        "periyot":          st.session_state.get("periyot_select", "1h"),
+        "pivot_window":     PIVOT_WINDOW,
+        "max_bars_between": MAX_BARS_BETWEEN,
+        "max_bars_signal":  MAX_BARS_SIGNAL,
+        "trend_lookback":   TREND_LOOKBACK,
+        "min_trend_drop":   MIN_TREND_DROP,
+        "body_pct":         BODY_PCT,
+        "min_signal_gap":   MIN_SIGNAL_GAP,
+        "limit":            LIMIT,
     })
     st.sidebar.success("Kaydedildi ✓")
 
@@ -173,120 +190,125 @@ def _yfinance(sembol, periyot, limit):
                                     "low":"min","close":"last","volume":"sum"}).dropna()
     return df
 
+# Streamlit Cloud'da STREAMLIT_SERVER_HEADLESS=true olur → Binance bloklu, yfinance kullan
+_IS_CLOUD = os.getenv("STREAMLIT_SERVER_HEADLESS", "false").lower() == "true"
+
 @st.cache_data(ttl=60)
 def veri_cek(sembol, periyot, limit):
+    if _IS_CLOUD:
+        return _yfinance(sembol, periyot, limit)
     try:
         return _binance(sembol, periyot, limit)
     except Exception:
         return _yfinance(sembol, periyot, limit)
 
-def pivot_high(high, length):
-    pivots = [None] * len(high)
-    for i in range(length, len(high) - length):
-        if high[i] == max(high[i - length: i + length + 1]):
-            pivots[i] = high[i]
+# ─── ANA TESPİT FONKSİYONU ────────────────────────────────
+def _pivot_lows(lows, window):
+    """Her iki yanda `window` bar boyunca en düşük olan barları döndür."""
+    n = len(lows)
+    pivots = []
+    for i in range(window, n - window):
+        lo = lows[i]
+        if lo == np.min(lows[i - window: i + window + 1]):
+            pivots.append(i)
     return pivots
 
-def pivot_low(low, length):
-    pivots = [None] * len(low)
-    for i in range(length, len(low) - length):
-        if low[i] == min(low[i - length: i + length + 1]):
-            pivots[i] = low[i]
-    return pivots
 
-def atr(df, period=14):
-    high = df["high"]; low = df["low"]
-    prev_close = df["close"].shift(1)
-    tr = pd.concat([
-        high - low,
-        (high - prev_close).abs(),
-        (low  - prev_close).abs()
-    ], axis=1).max(axis=1)
-    return tr.rolling(period).mean()
-
-def wyckoff_tespit(df):
+def double_bottom_tespit(df):
+    """
+    Pivot tabanlı Double Bottom Spring tespiti:
+      1. Pivot low listesi çıkar (her iki yanda PIVOT_WINDOW bar boyunca en düşük)
+      2. B1 ve B2 adayları bu pivot listesinden seçilir
+      3. Kurallar:
+         - B1 öncesinde %MIN_TREND_DROP düşüş trendi
+         - B2.low < B1.low  (wick bazlı)
+         - Aralarında neckline (pivot high) var
+         - Neckline kırılımı: breakout barın close'u neckline üstünde
+         - Breakout mumu güçlü gövdeli
+    """
     highs  = df["high"].values
     lows   = df["low"].values
     opens  = df["open"].values
     closes = df["close"].values
-    atr_v  = atr(df).values
+    n      = len(df)
 
-    ph_list = pivot_high(highs, PIVOT_LEN)
-    pl_list = pivot_low(lows,   PIVOT_LEN)
+    pivot_idx = _pivot_lows(lows, PIVOT_WINDOW)
 
-    ph_vals, ph_idxs = [], []
-    pl_vals, pl_idxs = [], []
-    sinyaller = []
-    son_spring_ph_idx = -1
-    son_thrust_pl_idx = -1
+    signals         = []
+    last_signal_bar = -999
 
-    for i in range(len(df)):
-        if ph_list[i] is not None:
-            ph_vals.insert(0, ph_list[i]); ph_idxs.insert(0, i)
-            if len(ph_vals) > 30: ph_vals.pop(); ph_idxs.pop()
-        if pl_list[i] is not None:
-            pl_vals.insert(0, pl_list[i]); pl_idxs.insert(0, i)
-            if len(pl_vals) > 30: pl_vals.pop(); pl_idxs.pop()
+    for pi2, b2 in enumerate(pivot_idx):
+        # Bu b2 için geçerli tüm b1 adaylarını topla
+        candidates = []
+        for pi1 in range(pi2 - 1, -1, -1):
+            b1 = pivot_idx[pi1]
+            if b2 - b1 > MAX_BARS_BETWEEN:
+                break
+            if b2 - b1 < PIVOT_WINDOW * 2:
+                continue
 
-        if not ph_vals or not pl_vals: continue
-        av = atr_v[i]
-        if np.isnan(av): continue
+            ts = max(0, b1 - TREND_LOOKBACK)
+            if ts >= b1:
+                continue
+            peak_offset = int(np.argmax(highs[ts:b1]))
+            prior_high  = float(highs[ts + peak_offset])
+            if prior_high == 0:
+                continue
+            if peak_offset > int((b1 - ts) * 0.7):
+                continue
+            drop_pct = (prior_high - lows[b1]) / prior_high * 100
+            if drop_pct < MIN_TREND_DROP:
+                continue
+            if lows[b2] >= lows[b1]:
+                continue
+            nk_arr = highs[b1 + 1: b2]
+            if len(nk_arr) == 0:
+                continue
+            neckline     = float(np.max(nk_arr))
+            neckline_idx = int(np.argmax(highs[b1 + 1: b2])) + b1 + 1
+            if neckline < lows[b1] * 1.03:
+                continue
 
-        # ── SPRING ──
-        ph_val = ph_vals[0]; ph_idx = ph_idxs[0]
-        pl_val = pl_vals[0]; pl_idx = pl_idxs[0]
+            candidates.append((b1, neckline, neckline_idx))
 
-        if pl_idx > ph_idx:
-            prev_pl_val = prev_pl_idx = None
-            for j in range(len(pl_idxs)):
-                if pl_idxs[j] < ph_idx:
-                    prev_pl_val = pl_vals[j]; prev_pl_idx = pl_idxs[j]; break
-            if prev_pl_val is not None:
-                lb = max(0, i - LOOKBACK)
-                if (max(highs[lb:i+1]) >= ph_val * (1 - TOLERANS_PCT / 100) and
-                    min(lows[lb:i+1])  <  prev_pl_val and
-                    closes[i] > ph_val and opens[i] < ph_val and
-                    (closes[i] - opens[i]) > (highs[i] - lows[i]) * 0.5 and
-                    (ph_val - prev_pl_val) > av * MIN_HEIGHT_ATR and
-                    pl_val >= prev_pl_val * (1 - MAX_DEPTH_PCT / 100) and
-                    (ph_idx - prev_pl_idx) >= MIN_BARS and
-                    (pl_idx - ph_idx)      >= MIN_BARS and
-                    ph_idx != son_spring_ph_idx):
-                    son_spring_ph_idx = ph_idx
-                    sinyaller.append({"bar": i, "tip": "spring",
-                        "prev_pl_val": prev_pl_val, "prev_pl_idx": prev_pl_idx,
-                        "ph_val": ph_val, "ph_idx": ph_idx,
-                        "pl_val": pl_val, "pl_idx": pl_idx})
+        if not candidates:
+            continue
 
-        # ── UPTHRUST ──
-        pl_val2 = pl_vals[0]; pl_idx2 = pl_idxs[0]
-        ph_val2 = ph_vals[0]; ph_idx2 = ph_idxs[0]
+        # En düşük low'a sahip B1'i seç (en anlamlı yapısal dip)
+        b1, neckline, neckline_idx = min(candidates, key=lambda c: lows[c[0]])
 
-        if ph_idx2 > pl_idx2:
-            prev_ph_val = prev_ph_idx = None
-            for j in range(len(ph_idxs)):
-                if ph_idxs[j] < pl_idx2:
-                    prev_ph_val = ph_vals[j]; prev_ph_idx = ph_idxs[j]; break
-            if prev_ph_val is not None:
-                lb = max(0, i - LOOKBACK)
-                if (min(lows[lb:i+1])  <= pl_val2 * (1 + TOLERANS_PCT / 100) and
-                    max(highs[lb:i+1]) >  prev_ph_val and
-                    closes[i] < pl_val2 and opens[i] > pl_val2 and
-                    (opens[i] - closes[i]) > (highs[i] - lows[i]) * 0.5 and
-                    (prev_ph_val - pl_val2) > av * MIN_HEIGHT_ATR and
-                    ph_val2 <= prev_ph_val * (1 + MAX_DEPTH_PCT / 100) and
-                    (pl_idx2 - prev_ph_idx) >= MIN_BARS and
-                    (ph_idx2 - pl_idx2)     >= MIN_BARS and
-                    pl_idx2 != son_thrust_pl_idx):
-                    son_thrust_pl_idx = pl_idx2
-                    sinyaller.append({"bar": i, "tip": "upthrust",
-                        "prev_ph_val": prev_ph_val, "prev_ph_idx": prev_ph_idx,
-                        "pl_val": pl_val2, "pl_idx": pl_idx2,
-                        "ph_val": ph_val2, "ph_idx": ph_idx2})
+        # Breakout ara
+        for i in range(b2 + 1, min(b2 + MAX_BARS_SIGNAL + 1, n)):
+            if i <= last_signal_bar:
+                continue
+            body   = closes[i] - opens[i]
+            candle = highs[i]  - lows[i]
+            if body <= 0 or candle == 0:
+                continue
+            if body / candle < BODY_PCT:
+                continue
+            if closes[i] <= neckline:
+                continue
 
-    return sinyaller
+            # ✅ Geçerli Double Bottom!
+            last_signal_bar = i + MIN_SIGNAL_GAP
+            signals.append({
+                "bar":          i,
+                "tip":          "double_bottom",
+                "b1_idx":       b1,
+                "b1_low":       float(lows[b1]),
+                "b2_idx":       b2,
+                "b2_low":       float(lows[b2]),
+                "b2_close":     float(closes[b2]),
+                "neckline":     neckline,
+                "neckline_idx": neckline_idx,
+            })
+            break
 
-def grafik_ciz(sembol, df, sinyaller):
+    return signals
+
+# ─── GRAFİK ────────────────────────────────────────────────
+def grafik_ciz(sembol, df, sinyaller, periyot):
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
                         row_heights=[0.8, 0.2], vertical_spacing=0.03)
     fig.add_trace(go.Candlestick(
@@ -294,57 +316,272 @@ def grafik_ciz(sembol, df, sinyaller):
         low=df["low"], close=df["close"], name=sembol,
         increasing_line_color="#26a69a", decreasing_line_color="#ef5350"
     ), row=1, col=1)
-    colors = ["#26a69a" if c >= o else "#ef5350" for c, o in zip(df["close"], df["open"])]
+    colors = ["#26a69a" if c >= o else "#ef5350"
+              for c, o in zip(df["close"], df["open"])]
     fig.add_trace(go.Bar(x=df.index, y=df["volume"],
         marker_color=colors, name="Hacim", opacity=0.6), row=2, col=1)
 
     for s in sinyaller:
         i = s["bar"]
-        if i >= len(df): continue
-        t = df.index[i]
-        if s["tip"] == "spring":
-            fig.add_shape(type="line",
-                x0=df.index[max(0, s["prev_pl_idx"])], x1=t,
-                y0=s["prev_pl_val"], y1=s["prev_pl_val"],
-                line=dict(color="rgba(100,149,237,0.7)", width=1, dash="dash"), row=1, col=1)
-            fig.add_shape(type="line",
-                x0=df.index[max(0, s["ph_idx"])], x1=t,
-                y0=s["ph_val"], y1=s["ph_val"],
-                line=dict(color="rgba(255,80,80,0.7)", width=1, dash="dash"), row=1, col=1)
-            fig.add_annotation(x=t, y=df["low"].iloc[i],
-                text="▲ SPRING", showarrow=True, arrowhead=2,
-                arrowcolor="#00e676", font=dict(color="#00e676", size=11),
-                ax=0, ay=35, row=1, col=1)
-        elif s["tip"] == "upthrust":
-            fig.add_shape(type="line",
-                x0=df.index[max(0, s["prev_ph_idx"])], x1=t,
-                y0=s["prev_ph_val"], y1=s["prev_ph_val"],
-                line=dict(color="rgba(255,80,80,0.7)", width=1, dash="dash"), row=1, col=1)
-            fig.add_shape(type="line",
-                x0=df.index[max(0, s["pl_idx"])], x1=t,
-                y0=s["pl_val"], y1=s["pl_val"],
-                line=dict(color="rgba(100,149,237,0.7)", width=1, dash="dash"), row=1, col=1)
-            fig.add_annotation(x=t, y=df["high"].iloc[i],
-                text="▼ UPTHRUST", showarrow=True, arrowhead=2,
-                arrowcolor="#ff5252", font=dict(color="#ff5252", size=11),
-                ax=0, ay=-35, row=1, col=1)
+        if i >= len(df):
+            continue
+        t      = df.index[i]
+        t_b1   = df.index[s["b1_idx"]]
+        t_b2   = df.index[s["b2_idx"]]
+        t_neck = df.index[s["neckline_idx"]]
+
+        # Pattern alanı dikdörtgen (hafif yeşil)
+        fig.add_shape(type="rect",
+            x0=t_b1, x1=t,
+            y0=min(s["b2_low"], s["b1_low"]) * 0.998,
+            y1=s["neckline"] * 1.002,
+            fillcolor="rgba(0,230,118,0.04)",
+            line=dict(color="rgba(0,230,118,0.25)", width=1),
+            row=1, col=1)
+
+        # B1 destek seviyesi (mavi kesik çizgi)
+        fig.add_shape(type="line",
+            x0=t_b1, x1=t,
+            y0=s["b1_low"], y1=s["b1_low"],
+            line=dict(color="rgba(100,149,237,0.7)", width=1, dash="dash"),
+            row=1, col=1)
+
+        # Neckline (turuncu kesik çizgi)
+        fig.add_shape(type="line",
+            x0=t_neck, x1=t,
+            y0=s["neckline"], y1=s["neckline"],
+            line=dict(color="rgba(255,165,0,0.8)", width=1, dash="dash"),
+            row=1, col=1)
+
+        # Bottom 1 işareti
+        fig.add_annotation(x=t_b1, y=s["b1_low"],
+            text="①", showarrow=True, arrowhead=2,
+            arrowcolor="#6495ed", font=dict(color="#6495ed", size=12),
+            ax=0, ay=28, row=1, col=1)
+
+        # Bottom 2 işareti (Spring)
+        fig.add_annotation(x=t_b2, y=s["b2_low"],
+            text="②", showarrow=True, arrowhead=2,
+            arrowcolor="#ff6b6b", font=dict(color="#ff6b6b", size=12),
+            ax=0, ay=28, row=1, col=1)
+
+        # Breakout (sinyal) işareti
+        fig.add_annotation(x=t, y=df["low"].iloc[i],
+            text="▲ SPRING", showarrow=True, arrowhead=2,
+            arrowcolor="#00e676", font=dict(color="#00e676", size=11),
+            ax=0, ay=35, row=1, col=1)
 
     fig.update_layout(
-        title=f"{sembol} — Wyckoff Spring & Upthrust ({PERIYOT})",
+        title=f"{sembol} — Double Bottom Spring ({periyot})",
         xaxis_rangeslider_visible=False,
         template="plotly_dark",
         dragmode="pan",
-        height=600,
+        height=620,
         showlegend=False,
-        margin=dict(t=50, b=20)
+        margin=dict(t=50, b=60),
+        newshape=dict(line_color="#00e676", line_width=2),
+        updatemenus=[{
+            "type":        "buttons",
+            "showactive":  False,
+            "bgcolor":     "rgba(30,30,30,0.85)",
+            "bordercolor": "#555",
+            "font":        {"color": "white", "size": 11},
+            "y":           0.18,
+            "x":           0.5,
+            "xanchor":     "center",
+            "yanchor":     "bottom",
+            "buttons": [{
+                "label":  "⊡  Autoscale",
+                "method": "relayout",
+                "args":   [{"yaxis.autorange":  True,
+                             "xaxis.autorange":  True,
+                             "yaxis2.autorange": True}]
+            }]
+        }]
     )
     return fig
 
+GRAFIK_CONFIG = {
+    "scrollZoom":              True,
+    "displayModeBar":          True,
+    "modeBarButtonsToRemove":  ["lasso2d", "select2d"],
+    "modeBarButtonsToAdd":     ["drawcircle", "drawrect", "drawopenpath",
+                                "drawline", "eraseshape"],
+}
+
 # ─── ANA SAYFA ─────────────────────────────────────────────
-st.title("📈 Wyckoff Spring & Upthrust")
+st.title("📈 Wyckoff Double Bottom Screener")
 st.caption("Binance Futures • Sol panelden sembol ve ayarları düzenleyebilirsin")
 
+# ── Periyot + Grafiği Göster (tab'ların üstünde) ───────────
+_col_p, _col_g = st.columns([2, 1])
+with _col_p:
+    PERIYOT = st.selectbox(
+        "Periyot", PERIYOT_LISTESI,
+        key="periyot_select",
+        label_visibility="collapsed",
+    )
+with _col_g:
+    if st.button("📊 Grafiği Göster", type="primary", use_container_width=True):
+        st.session_state.grafik_gosteriliyor = True
+
 tab1, tab2 = st.tabs(["🔍 Screener", "📊 Grafik"])
+
+# Çizim: otomatik pan + erase sabit stil + renk seçici
+components.html("""
+<script>
+(function() {
+    var pDoc;
+    try { pDoc = window.parent.document; } catch(e) { return; }
+
+    var DRAW_MODES = ['drawcircle','drawrect','drawopenpath','drawline','drawclosedpath'];
+    var STORAGE_KEY = 'wyckoff_draw_color';
+
+    function applyNewShapeColor(plot, color) {
+        [plot.layout, plot._fullLayout].forEach(function(l) {
+            if (!l) return;
+            if (!l.newshape)      l.newshape      = {};
+            if (!l.newshape.line) l.newshape.line = {};
+            l.newshape.line.color = color;
+        });
+    }
+
+    function recolorShape(plot, idx, color) {
+        if (idx < 0) return;
+        var gs = plot.querySelectorAll('.shapelayer > g');
+        if (idx < gs.length) {
+            gs[idx].querySelectorAll('path,line,polyline').forEach(function(el) {
+                el.setAttribute('stroke', color);
+            });
+        }
+        [plot.layout, plot._fullLayout].forEach(function(l) {
+            if (l && l.shapes && l.shapes[idx]) {
+                if (!l.shapes[idx].line) l.shapes[idx].line = {};
+                l.shapes[idx].line.color = color;
+            }
+        });
+    }
+
+    // Erase: drawline butonunun grubundaki son buton = eraseshape
+    function styleEraseBtn(plot) {
+        if (plot._eraseBtnStyled) return;
+
+        // Yöntem 1: doğrudan data-val
+        var btn = plot.querySelector('[data-val="eraseshape"]');
+
+        // Yöntem 2: drawline/drawcircle'ın parent grubundaki son buton
+        if (!btn) {
+            var ref = plot.querySelector('[data-val="drawline"]') ||
+                      plot.querySelector('[data-val="drawcircle"]');
+            if (ref) {
+                var grp = ref.parentElement;
+                while (grp && !grp.classList.contains('modebar-group'))
+                    grp = grp.parentElement;
+                if (grp) {
+                    var all = grp.querySelectorAll('a.modebar-btn');
+                    if (all.length) btn = all[all.length - 1];
+                }
+            }
+        }
+
+        // Yöntem 3: tüm butonlarda data-title / innerHTML içinde "eras" ara
+        if (!btn) {
+            var btns = plot.querySelectorAll('a.modebar-btn');
+            for (var i = 0; i < btns.length; i++) {
+                var s = (btns[i].getAttribute('data-title') || '') +
+                        (btns[i].getAttribute('data-val')   || '') +
+                        btns[i].innerHTML;
+                if (s.toLowerCase().indexOf('eras') >= 0) { btn = btns[i]; break; }
+            }
+        }
+
+        if (!btn) return;
+        plot._eraseBtnStyled = true;
+
+        // Pan butonu gibi sabit koyu görünsün
+        var panBtn = plot.querySelector('[data-val="pan"]');
+        if (panBtn) {
+            var cs = pDoc.defaultView.getComputedStyle(panBtn);
+            btn.style.background   = cs.background   || 'rgba(55,55,55,0.9)';
+            btn.style.borderRadius = cs.borderRadius || '3px';
+            btn.style.opacity      = '1';
+        } else {
+            btn.style.background   = 'rgba(55,55,55,0.9)';
+            btn.style.borderRadius = '3px';
+        }
+        btn.style.border = '1px solid rgba(255,255,255,0.25)';
+    }
+
+    function addColorPicker(plot) {
+        if (plot._colorPickerAdded) return;
+        var modebar = plot.querySelector('.modebar');
+        if (!modebar) return;
+        plot._colorPickerAdded = true;
+        plot._lastShapeIdx = -1;
+
+        var savedColor = localStorage.getItem(STORAGE_KEY) || '#00e676';
+        applyNewShapeColor(plot, savedColor);
+
+        var group = pDoc.createElement('div');
+        group.style.cssText = 'display:inline-flex;align-items:center;padding:0 5px;' +
+            'border-left:1px solid rgba(255,255,255,0.15);';
+        var picker = pDoc.createElement('input');
+        picker.type  = 'color';
+        picker.value = savedColor;
+        picker.title = 'Çizim rengi';
+        picker.style.cssText = 'width:22px;height:18px;border:none;border-radius:3px;' +
+            'cursor:pointer;padding:1px;background:transparent;';
+        group.appendChild(picker);
+        modebar.appendChild(group);
+
+        // Hangi shape tıklandı: elementsFromPoint ile katman sırasına bakmaksızın bul
+        plot.addEventListener('mousedown', function(e) {
+            var els = pDoc.elementsFromPoint(e.clientX, e.clientY);
+            var gs  = plot.querySelectorAll('.shapelayer > g');
+            for (var j = 0; j < els.length; j++) {
+                for (var i = 0; i < gs.length; i++) {
+                    if (gs[i] === els[j] || gs[i].contains(els[j])) {
+                        plot._lastShapeIdx = i;
+                        return;
+                    }
+                }
+            }
+        });
+
+        picker.addEventListener('input', function() {
+            var c = picker.value;
+            localStorage.setItem(STORAGE_KEY, c);
+            applyNewShapeColor(plot, c);
+            recolorShape(plot, plot._lastShapeIdx, c);
+        });
+    }
+
+    function attachRelayout(plot) {
+        if (plot._drawAutoOff) return;
+        plot._drawAutoOff = true;
+        plot.on('plotly_relayout', function(ed) {
+            if (ed.hasOwnProperty('shapes')) {
+                var dm = plot._fullLayout && plot._fullLayout.dragmode;
+                if (DRAW_MODES.indexOf(dm) >= 0) {
+                    setTimeout(function() {
+                        var btn = plot.querySelector('[data-attr="dragmode"][data-val="pan"]');
+                        if (btn) btn.click();
+                    }, 100);
+                }
+            }
+        });
+    }
+
+    setInterval(function() {
+        pDoc.querySelectorAll('.js-plotly-plot').forEach(function(plot) {
+            styleEraseBtn(plot);
+            addColorPicker(plot);
+            attachRelayout(plot);
+        });
+    }, 500);
+})();
+</script>
+""", height=1)
 
 # ── TAB 1: SCREENER ────────────────────────────────────────
 with tab1:
@@ -352,7 +589,9 @@ with tab1:
 
     if st.session_state.scanning:
         with btn_area.container():
-            st.markdown('<div class="runner-top"><span class="runner-on-btn">🏃</span></div>', unsafe_allow_html=True)
+            st.markdown(
+                '<div class="runner-top"><span class="runner-on-btn">🏃</span></div>',
+                unsafe_allow_html=True)
             if st.button("⏹️ Durdur", use_container_width=True, key="durdur_btn"):
                 st.session_state.scanning       = False
                 st.session_state.stop_requested = False
@@ -371,16 +610,17 @@ with tab1:
         for idx, sembol in enumerate(SEMBOLLER):
             if st.session_state.stop_requested:
                 break
-            progress.progress((idx + 1) / len(SEMBOLLER), text=f"{sembol} taranıyor...")
+            progress.progress((idx + 1) / len(SEMBOLLER),
+                               text=f"{sembol} taranıyor...")
             try:
-                df       = veri_cek(sembol, PERIYOT, LIMIT)
-                sinyaller = wyckoff_tespit(df)
-                aktif    = [s for s in sinyaller if s["bar"] >= len(df) - 5]
-                bars_ago = (len(df) - 1 - sinyaller[-1]["bar"]) if sinyaller else None
+                df        = veri_cek(sembol, PERIYOT, LIMIT)
+                sinyaller = double_bottom_tespit(df)
+                aktif     = [s for s in sinyaller if s["bar"] >= len(df) - 5]
+                bars_ago  = (len(df) - 1 - sinyaller[-1]["bar"]) if sinyaller else None
 
                 st.session_state.scan_results.append({
                     "sembol":    sembol,
-                    "sinyal":    (aktif[-1]["tip"] if aktif else None),
+                    "sinyal":    ("double_bottom" if aktif else None),
                     "fiyat":     round(df["close"].iloc[-1], 4),
                     "bars_ago":  bars_ago,
                     "df":        df,
@@ -398,87 +638,77 @@ with tab1:
 
     # Sonuçları göster
     if st.session_state.scan_results:
-        aktif_list = [r for r in st.session_state.scan_results if r["sinyal"] in ("spring", "upthrust")]
-        sessiz_list = [r for r in st.session_state.scan_results if r["sinyal"] is None]
+        aktif_list  = [r for r in st.session_state.scan_results
+                       if r["sinyal"] == "double_bottom"]
+        sessiz_list = [r for r in st.session_state.scan_results
+                       if r["sinyal"] is None]
 
         col1, col2 = st.columns(2)
         col1.metric("Aktif Sinyal", len(aktif_list))
         col2.metric("Sinyal Yok",   len(sessiz_list))
         st.markdown("---")
 
-        # Aktif sinyaller — tıklanabilir satırlar
         if aktif_list:
             st.subheader("🎯 Aktif Sinyaller")
             for r in aktif_list:
-                is_spring = r["sinyal"] == "spring"
                 c1, c2, c3, c4, c5 = st.columns([2, 2, 2, 2, 1])
                 c1.markdown(f"**{r['sembol']}**")
-                if is_spring:
-                    c2.markdown(":green[▲ SPRING]")
-                else:
-                    c2.markdown(":red[▼ UPTHRUST]")
+                c2.markdown(":green[▲ DOUBLE BOTTOM]")
                 c3.markdown(f"`{r['fiyat']}`")
-                c4.markdown(f"_{r['bars_ago']} bar önce_" if r["bars_ago"] is not None else "—")
+                c4.markdown(
+                    f"_{r['bars_ago']} bar önce_"
+                    if r["bars_ago"] is not None else "—")
                 if c5.button("📊", key=f"chart_{r['sembol']}"):
-                    st.session_state.selected_symbol = r["sembol"]
+                    st.session_state.selected_symbol        = r["sembol"]
                     st.session_state.show_chart_in_screener = True
             st.markdown("---")
 
-        # Tüm semboller tablosu
         st.subheader("Tüm Semboller")
         tablo = []
         for r in st.session_state.scan_results:
-            if r["sinyal"] == "spring":      sinyal_str = "▲ SPRING"
-            elif r["sinyal"] == "upthrust":  sinyal_str = "▼ UPTHRUST"
-            elif r["sinyal"] == "hata":      sinyal_str = f"HATA: {r.get('hata_msg','')[:60]}"
-            else:                            sinyal_str = "—"
+            if r["sinyal"] == "double_bottom":
+                sinyal_str = "▲ DOUBLE BOTTOM"
+            elif r["sinyal"] == "hata":
+                sinyal_str = f"HATA: {r.get('hata_msg','')[:60]}"
+            else:
+                sinyal_str = "—"
             tablo.append({
-                "Sembol":      r["sembol"],
-                "Sinyal":      sinyal_str,
-                "Fiyat":       r["fiyat"],
-                "Son Sinyal":  f"{r['bars_ago']} bar önce" if r.get("bars_ago") is not None else "—",
+                "Sembol":     r["sembol"],
+                "Sinyal":     sinyal_str,
+                "Fiyat":      r["fiyat"],
+                "Son Sinyal": f"{r['bars_ago']} bar önce"
+                              if r.get("bars_ago") is not None else "—",
             })
         st.dataframe(pd.DataFrame(tablo), use_container_width=True, hide_index=True)
 
-        # Tıklanan sembolün grafiği
-        if st.session_state.show_chart_in_screener and st.session_state.selected_symbol:
+        if (st.session_state.show_chart_in_screener
+                and st.session_state.selected_symbol):
             sel   = st.session_state.selected_symbol
-            match = next((r for r in st.session_state.scan_results if r["sembol"] == sel), None)
+            match = next((r for r in st.session_state.scan_results
+                          if r["sembol"] == sel), None)
             if match and match["df"] is not None:
                 st.markdown(f"---\n### 📊 {sel} — {PERIYOT}")
-                fig = grafik_ciz(sel, match["df"], match["sinyaller"])
-                st.plotly_chart(fig, use_container_width=True, config={
-                    "scrollZoom": True,
-                    "displayModeBar": True,
-                    "modeBarButtonsToRemove": ["lasso2d", "select2d"],
-                })
+                fig = grafik_ciz(sel, match["df"], match["sinyaller"], PERIYOT)
+                st.plotly_chart(fig, use_container_width=True, config=GRAFIK_CONFIG)
 
 # ── TAB 2: GRAFİK ──────────────────────────────────────────
 with tab2:
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        secili = st.selectbox("Sembol seç", SEMBOLLER if SEMBOLLER else ["BTC/USDT"])
-    with col2:
-        st.markdown("<br>", unsafe_allow_html=True)
-        goster = st.button("📊 Grafiği Göster", type="primary", use_container_width=True)
+    secili_list = SEMBOLLER if SEMBOLLER else ["BTC/USDT"]
+    secili = st.selectbox("Sembol seç", secili_list)
 
-    if goster:
+    if st.session_state.grafik_gosteriliyor:
         with st.spinner(f"{secili} verisi çekiliyor..."):
             try:
                 df        = veri_cek(secili, PERIYOT, LIMIT)
-                sinyaller = wyckoff_tespit(df)
-                spring_n  = sum(1 for s in sinyaller if s["tip"] == "spring")
+                sinyaller = double_bottom_tespit(df)
 
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Toplam Bar", len(df))
-                c2.metric("Spring",     spring_n)
-                c3.metric("Upthrust",   len(sinyaller) - spring_n)
+                c1, c2 = st.columns(2)
+                c1.metric("Toplam Bar",    len(df))
+                c2.metric("Double Bottom", len(sinyaller))
 
-                fig = grafik_ciz(secili, df, sinyaller)
-                st.plotly_chart(fig, use_container_width=True, config={
-                    "scrollZoom": True,
-                    "displayModeBar": True,
-                    "modeBarButtonsToRemove": ["lasso2d", "select2d"],
-                })
+                fig = grafik_ciz(secili, df, sinyaller, PERIYOT)
+                st.plotly_chart(fig, use_container_width=True, config=GRAFIK_CONFIG)
             except Exception as e:
                 st.error(f"Hata: {e}")
+    else:
+        st.info("Yukarıdan periyot seçip **📊 Grafiği Göster** butonuna tıklayın.")
