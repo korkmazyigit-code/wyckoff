@@ -106,6 +106,7 @@ for k, v in [
     ("selected_symbol",        None),
     ("show_chart_in_screener", False),
     ("grafik_gosteriliyor",    False),
+    ("switch_to_grafik",       False),
 ]:
     if k not in st.session_state:
         st.session_state[k] = v
@@ -424,6 +425,24 @@ with _col_p:
 with _col_g:
     if st.button("📊 Grafiği Göster", type="primary", use_container_width=True):
         st.session_state.grafik_gosteriliyor = True
+        st.session_state.switch_to_grafik    = True
+
+# Grafik tabına otomatik geç
+if st.session_state.switch_to_grafik:
+    st.session_state.switch_to_grafik = False
+    components.html("""
+    <script>
+    setTimeout(function() {
+        var tabs = window.parent.document.querySelectorAll('[data-baseweb="tab"]');
+        for (var i = 0; i < tabs.length; i++) {
+            if (tabs[i].textContent.indexOf('Grafik') >= 0) {
+                tabs[i].click();
+                break;
+            }
+        }
+    }, 150);
+    </script>
+    """, height=1)
 
 tab1, tab2 = st.tabs(["🔍 Screener", "📊 Grafik"])
 
