@@ -379,7 +379,7 @@ def grafik_ciz(sembol, df, sinyaller, periyot):
     px_str     = f"{last_close:,.4f}" if last_close < 10 else f"{last_close:,.2f}"
 
     fig.add_annotation(
-        x=1.002, xref="paper",
+        x=1.0, xref="paper",
         y=last_close, yref="y",
         text=f" {px_str} ",
         showarrow=False,
@@ -389,6 +389,7 @@ def grafik_ciz(sembol, df, sinyaller, periyot):
         borderpad=3,
         xanchor="left",
         yanchor="middle",
+        cliponaxis=False,
     )
 
     fig.update_layout(
@@ -398,7 +399,7 @@ def grafik_ciz(sembol, df, sinyaller, periyot):
         dragmode="pan",
         height=620,
         showlegend=False,
-        margin=dict(t=50, b=60),
+        margin=dict(t=50, b=60, r=75),
         newshape=dict(line_color="#00e676", line_width=2),
         updatemenus=[{
             "type":        "buttons",
