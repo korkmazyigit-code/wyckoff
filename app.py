@@ -372,6 +372,25 @@ def grafik_ciz(sembol, df, sinyaller, periyot):
             arrowcolor="#00e676", font=dict(color="#00e676", size=11),
             ax=0, ay=35, row=1, col=1)
 
+    # ── Son fiyat etiketi (Y ekseninde, TradingView stili) ────
+    last_close = float(df["close"].iloc[-1])
+    last_open  = float(df["open"].iloc[-1])
+    px_color   = "#26a69a" if last_close >= last_open else "#ef5350"
+    px_str     = f"{last_close:,.4f}" if last_close < 10 else f"{last_close:,.2f}"
+
+    fig.add_annotation(
+        x=1.002, xref="paper",
+        y=last_close, yref="y",
+        text=f" {px_str} ",
+        showarrow=False,
+        font=dict(color="white", size=10, family="monospace"),
+        bgcolor=px_color,
+        bordercolor=px_color,
+        borderpad=3,
+        xanchor="left",
+        yanchor="middle",
+    )
+
     fig.update_layout(
         title=f"{sembol} — Double Bottom Spring ({periyot})",
         xaxis_rangeslider_visible=False,
