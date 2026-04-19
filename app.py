@@ -269,21 +269,18 @@ def double_bottom_tespit(df):
     closes = df["close"].values
     n      = len(df)
 
-    B2_WINDOW      = max(1, PIVOT_WINDOW // 2)
-    pivot_idx      = _pivot_lows(lows, PIVOT_WINDOW)   # B1 için sıkı
-    pivot_b2_idx   = _pivot_lows(lows, B2_WINDOW)      # B2 için gevşek
+    pivot_idx      = _pivot_lows(lows, PIVOT_WINDOW)
     pivot_high_idx = _pivot_highs(highs, PIVOT_WINDOW)
 
     signals         = []
     last_signal_bar = -999
 
-    for pi2, b2 in enumerate(pivot_b2_idx):
+    for pi2, b2 in enumerate(pivot_idx):
         if b2 <= last_signal_bar:
             continue
         candidates = []
-        for b1 in reversed(pivot_idx):
-            if b1 >= b2:
-                continue
+        for pi1 in range(pi2 - 1, -1, -1):
+            b1 = pivot_idx[pi1]
             if b2 - b1 > MAX_BARS_BETWEEN:
                 break
             if b2 - b1 < PIVOT_WINDOW * 2:
@@ -363,21 +360,18 @@ def likidite_alimi_tespit(df):
     closes = df["close"].values
     n      = len(df)
 
-    B2_WINDOW      = max(1, PIVOT_WINDOW // 2)
-    pivot_idx      = _pivot_lows(lows, PIVOT_WINDOW)   # B1 için sıkı
-    pivot_b2_idx   = _pivot_lows(lows, B2_WINDOW)      # B2 için gevşek
+    pivot_idx      = _pivot_lows(lows, PIVOT_WINDOW)
     pivot_high_idx = _pivot_highs(highs, PIVOT_WINDOW)
 
     signals         = []
     last_signal_bar = -999
 
-    for pi2, b2 in enumerate(pivot_b2_idx):
+    for pi2, b2 in enumerate(pivot_idx):
         if b2 <= last_signal_bar:
             continue
         candidates = []
-        for b1 in reversed(pivot_idx):
-            if b1 >= b2:
-                continue
+        for pi1 in range(pi2 - 1, -1, -1):
+            b1 = pivot_idx[pi1]
             if b2 - b1 > MAX_BARS_BETWEEN:
                 break
             if b2 - b1 < PIVOT_WINDOW * 2:
