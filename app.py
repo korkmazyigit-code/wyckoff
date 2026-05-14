@@ -1,5 +1,5 @@
 import streamlit as st
-import streamlit.components.v1 as components
+
 import ccxt
 import pandas as pd
 import plotly.graph_objects as go
@@ -768,7 +768,7 @@ with _col_g:
 # Grafik tabına otomatik geç
 if st.session_state.switch_to_grafik:
     st.session_state.switch_to_grafik = False
-    components.html("""
+    st.html("""
     <script>
     setTimeout(function() {
         var tabs = window.parent.document.querySelectorAll('[data-baseweb="tab"]');
@@ -785,7 +785,7 @@ if st.session_state.switch_to_grafik:
 tab1, tab2 = st.tabs(["🔍 Screener", "📊 Grafik"])
 
 # Çizim: otomatik pan + erase sabit stil + renk seçici
-components.html("""
+st.html("""
 <script>
 (function() {
     var pDoc;
