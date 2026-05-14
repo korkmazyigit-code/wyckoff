@@ -780,7 +780,7 @@ if st.session_state.switch_to_grafik:
         }
     }, 150);
     </script>
-    """, height=1)
+    """)
 
 tab1, tab2 = st.tabs(["🔍 Screener", "📊 Grafik"])
 
@@ -938,7 +938,7 @@ st.html("""
     }, 500);
 })();
 </script>
-""", height=1)
+""")
 
 # ── TAB 1: SCREENER ────────────────────────────────────────
 with tab1:
