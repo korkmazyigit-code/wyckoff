@@ -7,7 +7,8 @@ from plotly.subplots import make_subplots
 import numpy as np
 import json, os
 
-st.set_page_config(page_title="Wyckoff Screener", layout="wide", page_icon="📈")
+st.set_page_config(page_title="Wyckoff Screener", layout="wide", page_icon="📈",
+                   initial_sidebar_state="expanded")
 
 # ─── CSS ───────────────────────────────────────────────────
 st.markdown("""
@@ -772,37 +773,6 @@ GRAFIK_CONFIG = {
 }
 
 # ─── ANA SAYFA ─────────────────────────────────────────────
-# Sidebar toggle butonu (Streamlit'in kendi butonu kaybolursa diye)
-st.html("""
-<style>
-#sidebar-toggle-btn {
-    position: fixed;
-    top: 10px;
-    left: 10px;
-    z-index: 9999;
-    background: #1a3a5c;
-    color: white;
-    border: 1px solid #2d5a8e;
-    border-radius: 6px;
-    padding: 4px 10px;
-    font-size: 18px;
-    cursor: pointer;
-    line-height: 1;
-}
-#sidebar-toggle-btn:hover { background: #2d5a8e; }
-</style>
-<button id="sidebar-toggle-btn" title="Menüyü Aç / Kapat"
-  onclick="(function(){
-    var pDoc = window.parent.document;
-    var btn = pDoc.querySelector('[data-testid=\\'collapsedControl\\'] button')
-           || pDoc.querySelector('[data-testid=\\'stSidebarCollapseButton\\']')
-           || pDoc.querySelector('button[aria-label=\\'Open sidebar\\']')
-           || pDoc.querySelector('button[aria-label=\\'Close sidebar\\']')
-           || pDoc.querySelector('[data-testid=\\'stSidebarCollapsedControl\\'] button');
-    if(btn){ btn.click(); }
-  })()">☰</button>
-""")
-
 st.title("📈 Wyckoff Double Bottom Screener")
 st.caption("Binance Futures • Sol panelden sembol ve ayarları düzenleyebilirsin")
 
