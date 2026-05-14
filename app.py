@@ -144,12 +144,12 @@ for sym in all_semboller:
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("**Pattern Filtresi:**")
-_MOD_LISTESI = ["Double Bottom", "Likidite Alımı", "Double Top", "Hepsi"]
+_MOD_LISTESI = ["DB + DT", "Likidite Alımı", "Hepsi"]
 PATTERN_MOD = st.sidebar.radio(
     "Gösterim modu",
     _MOD_LISTESI,
-    index=_MOD_LISTESI.index(ayarlar.get("pattern_mod", "Hepsi"))
-          if ayarlar.get("pattern_mod", "Hepsi") in _MOD_LISTESI else 3,
+    index=_MOD_LISTESI.index(ayarlar.get("pattern_mod", "DB + DT"))
+          if ayarlar.get("pattern_mod", "DB + DT") in _MOD_LISTESI else 0,
     label_visibility="collapsed",
 )
 SADECE_LQ = (PATTERN_MOD == "Likidite Alımı")
@@ -939,12 +939,10 @@ with tab1:
 
                 if PATTERN_MOD == "Likidite Alımı":
                     sinyaller = lq_sin
-                elif PATTERN_MOD == "Double Bottom":
-                    sinyaller = db_sin
-                elif PATTERN_MOD == "Double Top":
-                    sinyaller = dt_sin
-                else:
+                elif PATTERN_MOD == "Hepsi":
                     sinyaller = db_sin + lq_sin + dt_sin
+                else:  # DB + DT
+                    sinyaller = db_sin + dt_sin
 
                 aktif    = [s for s in sinyaller if s["bar"] >= len(df) - 5]
                 tum_sin  = db_sin + lq_sin + dt_sin
@@ -953,7 +951,9 @@ with tab1:
                 # Aktif sinyal tipi belirle
                 if aktif:
                     tipler = {s["tip"] for s in aktif}
-                    if "double_top" in tipler:
+                    if "double_top" in tipler and "double_bottom" in tipler:
+                        sinyal_tip = "db_dt"
+                    elif "double_top" in tipler:
                         sinyal_tip = "double_top"
                     elif "double_bottom" in tipler and "likidite_alimi" in tipler:
                         sinyal_tip = "her_ikisi"
@@ -1007,6 +1007,8 @@ with tab1:
                     c2.markdown(":green[▲ DB + 💧 LQ]")
                 elif r["sinyal"] == "double_top":
                     c2.markdown(":red[▼ DOUBLE TOP]")
+                elif r["sinyal"] == "db_dt":
+                    c2.markdown(":orange[▲▼ DB + DT]")
                 else:
                     c2.markdown(":green[▲ DOUBLE BOTTOM]")
                 c3.markdown(f"`{r['fiyat']}`")
@@ -1027,6 +1029,8 @@ with tab1:
                 sinyal_str = "▲ DB + 💧 LQ"
             elif r["sinyal"] == "double_top":
                 sinyal_str = "▼ DOUBLE TOP"
+            elif r["sinyal"] == "db_dt":
+                sinyal_str = "▲▼ DB + DT"
             elif r["sinyal"] == "hata":
                 sinyal_str = f"HATA: {r.get('hata_msg','')[:60]}"
             else:
@@ -1064,12 +1068,10 @@ with tab2:
 
                 if PATTERN_MOD == "Likidite Alımı":
                     sinyaller = lq_sin
-                elif PATTERN_MOD == "Double Bottom":
-                    sinyaller = db_sin
-                elif PATTERN_MOD == "Double Top":
-                    sinyaller = dt_sin
-                else:
+                elif PATTERN_MOD == "Hepsi":
                     sinyaller = db_sin + lq_sin + dt_sin
+                else:  # DB + DT
+                    sinyaller = db_sin + dt_sin
 
                 c1, c2, c3, c4 = st.columns(4)
                 c1.metric("Toplam Bar",     len(df))
