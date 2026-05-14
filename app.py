@@ -930,14 +930,17 @@ st.html("""
 # ── SCREENER / GRAFİK GÖRÜNÜMÜ ─────────────────────────────
 if not st.session_state.grafik_gosteriliyor:
     # ── SCREENER ───────────────────────────────────────────
-    if st.button("📊 Grafiği Göster", type="primary", use_container_width=True):
-        st.session_state.grafik_gosteriliyor = True
-        st.rerun()
+    _btn_col1, _btn_col2 = st.columns(2)
 
-    btn_area = st.empty()
+    with _btn_col1:
+        if st.button("📊 Grafiği Göster", type="primary", use_container_width=True):
+            st.session_state.grafik_gosteriliyor = True
+            st.rerun()
+
+    _scan_area = _btn_col2.empty()
 
     if st.session_state.scanning:
-        with btn_area.container():
+        with _scan_area.container():
             st.markdown(
                 '<div class="runner-top"><span class="runner-on-btn">🏃</span></div>',
                 unsafe_allow_html=True)
@@ -946,7 +949,7 @@ if not st.session_state.grafik_gosteriliyor:
                 st.session_state.stop_requested = False
                 st.rerun()
     else:
-        if btn_area.button("🚀 Tara", type="primary", use_container_width=True):
+        if _scan_area.button("🚀 Tara", type="primary", use_container_width=True):
             st.session_state.scanning       = True
             st.session_state.stop_requested = False
             st.session_state.scan_results   = []
