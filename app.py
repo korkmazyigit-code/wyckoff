@@ -15,7 +15,7 @@ st.markdown("""
 [data-testid="stStatusWidget"]       { display: none !important; }
 [data-testid="stToolbar"]            { display: none !important; }
 #MainMenu                            { display: none !important; }
-button[kind="header"]                { display: none !important; }
+
 .stAppDeployButton                   { display: none !important; }
 
 @keyframes slideRight {
