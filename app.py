@@ -117,12 +117,16 @@ for k, v in [
 if "periyot_select" not in st.session_state:
     st.session_state["periyot_select"] = ayarlar.get("periyot", "1h")
 
+# Sembol listesi: ayarlardan başlat, session_state ile yönetilir
+if "sembol_text" not in st.session_state:
+    st.session_state["sembol_text"] = ayarlar.get("semboller_text", VARSAYILAN_SEMBOLLER)
+
 # ─── SIDEBAR ───────────────────────────────────────────────
 st.sidebar.title("⚙️ Ayarlar")
 
 sembol_text = st.sidebar.text_area(
     "Semboller (her satıra bir tane)",
-    value=ayarlar.get("semboller_text", VARSAYILAN_SEMBOLLER),
+    key="sembol_text",
     height=180,
 )
 all_semboller = [s.strip().upper() for s in sembol_text.strip().splitlines() if s.strip()]
@@ -140,12 +144,12 @@ for sym in all_semboller:
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("**Pattern Filtresi:**")
+_MOD_LISTESI = ["Double Bottom", "Likidite Alımı", "Double Top", "Hepsi"]
 PATTERN_MOD = st.sidebar.radio(
     "Gösterim modu",
-    ["Double Bottom", "Likidite Alımı", "İkisi de"],
-    index=["Double Bottom", "Likidite Alımı", "İkisi de"].index(
-        ayarlar.get("pattern_mod", "İkisi de")
-    ),
+    _MOD_LISTESI,
+    index=_MOD_LISTESI.index(ayarlar.get("pattern_mod", "Hepsi"))
+          if ayarlar.get("pattern_mod", "Hepsi") in _MOD_LISTESI else 3,
     label_visibility="collapsed",
 )
 SADECE_LQ = (PATTERN_MOD == "Likidite Alımı")
@@ -416,6 +420,111 @@ def likidite_alimi_tespit(df):
 
     return signals
 
+
+def double_top_tespit(df):
+    """
+    Double Top tespiti (double_bottom_tespit'in aynası):
+      - T2-centric: her pivot high için geriye bakıp T1 adayları toplanır
+      - T2.high > T1.high (wick bazlı)
+      - T2 ±2 pencerede en az bir close T1 high üstünde kapanmalı
+      - Aralarında neckline (en düşük low), neckline kırılımı + güçlü gövdeli breakdown
+      - T1 öncesinde yükselen trend: yakın pivot low'dan T1'e yükseliş >= MIN_TREND_DROP
+    """
+    highs  = df["high"].values
+    lows   = df["low"].values
+    opens  = df["open"].values
+    closes = df["close"].values
+    n      = len(df)
+
+    pivot_idx      = _pivot_highs(highs, PIVOT_WINDOW)
+    pivot_low_idx  = _pivot_lows(lows, PIVOT_WINDOW)
+
+    signals         = []
+    last_signal_bar = -999
+
+    for pi2, t2 in enumerate(pivot_idx):
+        if t2 <= last_signal_bar:
+            continue
+        candidates = []
+        for pi1 in range(pi2 - 1, -1, -1):
+            t1 = pivot_idx[pi1]
+            if t2 - t1 > MAX_BARS_BETWEEN:
+                break
+            if t2 - t1 < PIVOT_WINDOW * 2:
+                continue
+
+            # Yükselen trend: T1 öncesinde yakın pivot low bulunmalı
+            ts = max(0, t1 - TREND_LOOKBACK)
+            recent_pl = [p for p in pivot_low_idx if ts <= p < t1]
+            if not recent_pl:
+                continue
+            prior_low = float(lows[recent_pl[-1]])
+            if prior_low == 0:
+                continue
+            rise_pct = (highs[t1] - prior_low) / prior_low * 100
+            if rise_pct < MIN_TREND_DROP:
+                continue
+
+            # T2 wick T1 high üstüne çıkmalı
+            if highs[t2] <= highs[t1]:
+                continue
+
+            # T2 ±2 pencerede en az bir close T1 high üstünde kapanmalı
+            w_start = max(0, t2 - 2)
+            w_end   = min(n, t2 + 3)
+            if not any(closes[j] > highs[t1] for j in range(w_start, w_end)):
+                continue
+
+            # T1 ile T2 arasında T1 high'ından yüksek pivot olmamalı
+            ara_pivotlar = [p for p in pivot_idx if t1 < p < t2]
+            if any(highs[p] > highs[t1] for p in ara_pivotlar):
+                continue
+
+            # Neckline: T1-T2 arası en düşük low
+            nk_arr = lows[t1 + 1: t2]
+            if len(nk_arr) == 0:
+                continue
+            neckline     = float(np.min(nk_arr))
+            neckline_idx = int(np.argmin(lows[t1 + 1: t2])) + t1 + 1
+            if neckline > highs[t1] * (1 - MIN_NECKLINE_PCT / 100):
+                continue
+
+            candidates.append((t1, neckline, neckline_idx))
+
+        if not candidates:
+            continue
+
+        t1, neckline, neckline_idx = max(candidates, key=lambda c: highs[c[0]])
+
+        for i in range(t2 + 1, min(t2 + MAX_BARS_SIGNAL + 1, n)):
+            if i <= last_signal_bar:
+                continue
+            body   = opens[i] - closes[i]
+            candle = highs[i] - lows[i]
+            if body <= 0 or candle == 0:
+                continue
+            if body / candle < BODY_PCT:
+                continue
+            if closes[i] >= neckline:
+                continue
+
+            last_signal_bar = i + MIN_SIGNAL_GAP
+            signals.append({
+                "bar":          i,
+                "tip":          "double_top",
+                "t1_idx":       t1,
+                "t1_high":      float(highs[t1]),
+                "t2_idx":       t2,
+                "t2_high":      float(highs[t2]),
+                "neckline":     neckline,
+                "neckline_idx": neckline_idx,
+                "breakout_bar": i,
+            })
+            break
+
+    return signals
+
+
 # ─── GRAFİK ────────────────────────────────────────────────
 def grafik_ciz(sembol, df, sinyaller, periyot):
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
@@ -436,6 +545,38 @@ def grafik_ciz(sembol, df, sinyaller, periyot):
         if i >= len(df):
             continue
         t    = df.index[i]
+
+        if tip == "double_top":
+            t_t1   = df.index[s["t1_idx"]]
+            t_t2   = df.index[s["t2_idx"]]
+            t_neck = df.index[s["neckline_idx"]]
+
+            fig.add_shape(type="rect",
+                x0=t_t1, x1=t,
+                y0=s["neckline"] * 0.998,
+                y1=max(s["t2_high"], s["t1_high"]) * 1.002,
+                fillcolor="rgba(255,80,80,0.04)",
+                line=dict(color="rgba(255,100,100,0.4)", width=1),
+                row=1, col=1)
+            fig.add_shape(type="line",
+                x0=t_t1, x1=t,
+                y0=s["neckline"], y1=s["neckline"],
+                line=dict(color="rgba(255,160,0,0.8)", width=1, dash="dash"),
+                row=1, col=1)
+            fig.add_annotation(x=t_t1, y=s["t1_high"],
+                text="①", showarrow=True, arrowhead=2,
+                arrowcolor="#ff6060", font=dict(color="#ff6060", size=12),
+                ax=0, ay=-28, row=1, col=1)
+            fig.add_annotation(x=t_t2, y=s["t2_high"],
+                text="②", showarrow=True, arrowhead=2,
+                arrowcolor="#ff6060", font=dict(color="#ff6060", size=12),
+                ax=0, ay=-28, row=1, col=1)
+            fig.add_annotation(x=t, y=s["neckline"],
+                text="▼ BREAKDOWN", showarrow=True, arrowhead=2,
+                arrowcolor="#ff4444", font=dict(color="#ff4444", size=11),
+                ax=0, ay=-35, row=1, col=1)
+            continue
+
         t_b1 = df.index[s["b1_idx"]]
         t_b2 = df.index[s["b2_idx"]]
 
@@ -794,22 +935,27 @@ with tab1:
                 df      = veri_cek(sembol, PERIYOT, LIMIT)
                 db_sin  = double_bottom_tespit(df)
                 lq_sin  = likidite_alimi_tespit(df)
+                dt_sin  = double_top_tespit(df)
 
                 if PATTERN_MOD == "Likidite Alımı":
                     sinyaller = lq_sin
                 elif PATTERN_MOD == "Double Bottom":
                     sinyaller = db_sin
+                elif PATTERN_MOD == "Double Top":
+                    sinyaller = dt_sin
                 else:
-                    sinyaller = db_sin + lq_sin
+                    sinyaller = db_sin + lq_sin + dt_sin
 
                 aktif    = [s for s in sinyaller if s["bar"] >= len(df) - 5]
-                tum_sin  = db_sin + lq_sin
+                tum_sin  = db_sin + lq_sin + dt_sin
                 bars_ago = (len(df) - 1 - tum_sin[-1]["bar"]) if tum_sin else None
 
                 # Aktif sinyal tipi belirle
                 if aktif:
                     tipler = {s["tip"] for s in aktif}
-                    if "double_bottom" in tipler and "likidite_alimi" in tipler:
+                    if "double_top" in tipler:
+                        sinyal_tip = "double_top"
+                    elif "double_bottom" in tipler and "likidite_alimi" in tipler:
                         sinyal_tip = "her_ikisi"
                     elif "likidite_alimi" in tipler:
                         sinyal_tip = "likidite_alimi"
@@ -827,6 +973,7 @@ with tab1:
                     "sinyaller": sinyaller,
                     "db_count":  len(db_sin),
                     "lq_count":  len(lq_sin),
+                    "dt_count":  len(dt_sin),
                 })
             except Exception as e:
                 st.session_state.scan_results.append({
@@ -858,6 +1005,8 @@ with tab1:
                     c2.markdown(":blue[💧 LİKİDİTE ALIMI]")
                 elif r["sinyal"] == "her_ikisi":
                     c2.markdown(":green[▲ DB + 💧 LQ]")
+                elif r["sinyal"] == "double_top":
+                    c2.markdown(":red[▼ DOUBLE TOP]")
                 else:
                     c2.markdown(":green[▲ DOUBLE BOTTOM]")
                 c3.markdown(f"`{r['fiyat']}`")
@@ -876,6 +1025,8 @@ with tab1:
                 sinyal_str = "💧 LİKİDİTE ALIMI"
             elif r["sinyal"] == "her_ikisi":
                 sinyal_str = "▲ DB + 💧 LQ"
+            elif r["sinyal"] == "double_top":
+                sinyal_str = "▼ DOUBLE TOP"
             elif r["sinyal"] == "hata":
                 sinyal_str = f"HATA: {r.get('hata_msg','')[:60]}"
             else:
@@ -909,18 +1060,22 @@ with tab2:
                 df     = veri_cek(secili, PERIYOT, LIMIT)
                 db_sin = double_bottom_tespit(df)
                 lq_sin = likidite_alimi_tespit(df)
+                dt_sin = double_top_tespit(df)
 
                 if PATTERN_MOD == "Likidite Alımı":
                     sinyaller = lq_sin
                 elif PATTERN_MOD == "Double Bottom":
                     sinyaller = db_sin
+                elif PATTERN_MOD == "Double Top":
+                    sinyaller = dt_sin
                 else:
-                    sinyaller = db_sin + lq_sin
+                    sinyaller = db_sin + lq_sin + dt_sin
 
-                c1, c2, c3 = st.columns(3)
+                c1, c2, c3, c4 = st.columns(4)
                 c1.metric("Toplam Bar",     len(df))
                 c2.metric("Double Bottom",  len(db_sin))
                 c3.metric("Likidite Alımı", len(lq_sin))
+                c4.metric("Double Top",     len(dt_sin))
 
                 fig = grafik_ciz(secili, df, sinyaller, PERIYOT)
                 st.plotly_chart(fig, use_container_width=True, config=GRAFIK_CONFIG)
