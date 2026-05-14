@@ -102,13 +102,11 @@ PERIYOT_LISTESI = ["1m", "5m", "15m", "1h", "4h", "1d", "1w"]
 
 # ─── SESSION STATE ─────────────────────────────────────────
 for k, v in [
-    ("scanning",               False),
-    ("stop_requested",         False),
-    ("scan_results",           []),
-    ("selected_symbol",        None),
-    ("show_chart_in_screener", False),
-    ("grafik_gosteriliyor",    False),
-    ("switch_to_grafik",       False),
+    ("scanning",            False),
+    ("stop_requested",      False),
+    ("scan_results",        []),
+    ("selected_symbol",     None),
+    ("grafik_gosteriliyor", False),
 ]:
     if k not in st.session_state:
         st.session_state[k] = v
@@ -118,29 +116,43 @@ if "periyot_select" not in st.session_state:
     st.session_state["periyot_select"] = ayarlar.get("periyot", "1h")
 
 # Sembol listesi: ayarlardan başlat, session_state ile yönetilir
-if "sembol_text" not in st.session_state:
-    st.session_state["sembol_text"] = ayarlar.get("semboller_text", VARSAYILAN_SEMBOLLER)
+if "sembol_listesi" not in st.session_state:
+    _saved_text = ayarlar.get("semboller_text", VARSAYILAN_SEMBOLLER)
+    st.session_state["sembol_listesi"] = [
+        s.strip().upper() for s in _saved_text.strip().splitlines() if s.strip()
+    ]
 
 # ─── SIDEBAR ───────────────────────────────────────────────
 st.sidebar.title("⚙️ Ayarlar")
 
-sembol_text = st.sidebar.text_area(
-    "Semboller (her satıra bir tane)",
-    key="sembol_text",
-    height=180,
+st.sidebar.markdown("**Semboller:**")
+_to_delete = None
+for _sym in st.session_state.sembol_listesi:
+    if f"cb_{_sym}" not in st.session_state:
+        st.session_state[f"cb_{_sym}"] = True
+    _sc1, _sc2 = st.sidebar.columns([5, 1])
+    with _sc1:
+        st.checkbox(_sym, key=f"cb_{_sym}")
+    with _sc2:
+        if st.button("✕", key=f"del_{_sym}", help=f"{_sym} sil"):
+            _to_delete = _sym
+if _to_delete:
+    st.session_state.sembol_listesi.remove(_to_delete)
+    st.rerun()
+
+_yeni_sembol = st.sidebar.text_input(
+    "", placeholder="BTC/USDT", key="yeni_sembol_input",
+    label_visibility="collapsed"
 )
-all_semboller = [s.strip().upper() for s in sembol_text.strip().splitlines() if s.strip()]
+if st.sidebar.button("+ Ekle", use_container_width=True):
+    _s = _yeni_sembol.strip().upper()
+    if _s and _s not in st.session_state.sembol_listesi:
+        st.session_state.sembol_listesi.append(_s)
+        st.session_state[f"cb_{_s}"] = True
+        st.rerun()
 
-# Yeni eklenen semboller için checkbox state başlat (varsayılan: seçili)
-for sym in all_semboller:
-    if f"cb_{sym}" not in st.session_state:
-        st.session_state[f"cb_{sym}"] = True
-
-st.sidebar.markdown("**Taranacak semboller:**")
-SEMBOLLER = []
-for sym in all_semboller:
-    if st.sidebar.checkbox(sym, key=f"cb_{sym}"):
-        SEMBOLLER.append(sym)
+all_semboller = st.session_state.sembol_listesi
+SEMBOLLER = [s for s in all_semboller if st.session_state.get(f"cb_{s}", True)]
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("**Pattern Filtresi:**")
@@ -174,7 +186,7 @@ with st.sidebar.expander("🔧 Parametreler"):
 st.sidebar.markdown("---")
 if st.sidebar.button("💾 Ayarları Kaydet", use_container_width=True):
     ayar_kaydet({
-        "semboller_text":   sembol_text,
+        "semboller_text":   "\n".join(st.session_state.sembol_listesi),
         "periyot":          st.session_state.get("periyot_select", "1h"),
         "pivot_window":     PIVOT_WINDOW,
         "max_bars_between": MAX_BARS_BETWEEN,
@@ -752,37 +764,12 @@ GRAFIK_CONFIG = {
 st.title("📈 Wyckoff Double Bottom Screener")
 st.caption("Binance Futures • Sol panelden sembol ve ayarları düzenleyebilirsin")
 
-# ── Periyot + Grafiği Göster (tab'ların üstünde) ───────────
-_col_p, _col_g = st.columns([2, 1])
-with _col_p:
-    PERIYOT = st.selectbox(
-        "Periyot", PERIYOT_LISTESI,
-        key="periyot_select",
-        label_visibility="collapsed",
-    )
-with _col_g:
-    if st.button("📊 Grafiği Göster", type="primary", use_container_width=True):
-        st.session_state.grafik_gosteriliyor = True
-        st.session_state.switch_to_grafik    = True
-
-# Grafik tabına otomatik geç
-if st.session_state.switch_to_grafik:
-    st.session_state.switch_to_grafik = False
-    st.html("""
-    <script>
-    setTimeout(function() {
-        var tabs = window.parent.document.querySelectorAll('[data-baseweb="tab"]');
-        for (var i = 0; i < tabs.length; i++) {
-            if (tabs[i].textContent.indexOf('Grafik') >= 0) {
-                tabs[i].click();
-                break;
-            }
-        }
-    }, 150);
-    </script>
-    """)
-
-tab1, tab2 = st.tabs(["🔍 Screener", "📊 Grafik"])
+# ── Periyot (her zaman görünür) ────────────────────────────
+PERIYOT = st.selectbox(
+    "Periyot", PERIYOT_LISTESI,
+    key="periyot_select",
+    label_visibility="collapsed",
+)
 
 # Çizim: otomatik pan + erase sabit stil + renk seçici
 st.html("""
@@ -940,8 +927,13 @@ st.html("""
 </script>
 """)
 
-# ── TAB 1: SCREENER ────────────────────────────────────────
-with tab1:
+# ── SCREENER / GRAFİK GÖRÜNÜMÜ ─────────────────────────────
+if not st.session_state.grafik_gosteriliyor:
+    # ── SCREENER ───────────────────────────────────────────
+    if st.button("📊 Grafiği Göster", type="primary", use_container_width=True):
+        st.session_state.grafik_gosteriliyor = True
+        st.rerun()
+
     btn_area = st.empty()
 
     if st.session_state.scanning:
@@ -955,10 +947,9 @@ with tab1:
                 st.rerun()
     else:
         if btn_area.button("🚀 Tara", type="primary", use_container_width=True):
-            st.session_state.scanning               = True
-            st.session_state.stop_requested         = False
-            st.session_state.scan_results           = []
-            st.session_state.show_chart_in_screener = False
+            st.session_state.scanning       = True
+            st.session_state.stop_requested = False
+            st.session_state.scan_results   = []
             st.rerun()
 
     # Tarama döngüsü
@@ -1052,8 +1043,9 @@ with tab1:
                 c3.markdown(f"`{r['fiyat']}`")
                 c4.markdown(f"_{r['bars_ago']} bar önce_" if r["bars_ago"] is not None else "—")
                 if c5.button("📊", key=f"chart_{r['sembol']}"):
-                    st.session_state.selected_symbol        = r["sembol"]
-                    st.session_state.show_chart_in_screener = True
+                    st.session_state.selected_symbol      = r["sembol"]
+                    st.session_state.grafik_gosteriliyor  = True
+                    st.rerun()
             st.markdown("---")
 
         st.subheader("Tüm Semboller")
@@ -1081,45 +1073,43 @@ with tab1:
             })
         st.dataframe(pd.DataFrame(tablo), use_container_width=True, hide_index=True)
 
-        if (st.session_state.show_chart_in_screener
-                and st.session_state.selected_symbol):
-            sel   = st.session_state.selected_symbol
-            match = next((r for r in st.session_state.scan_results
-                          if r["sembol"] == sel), None)
-            if match and match["df"] is not None:
-                st.markdown(f"---\n### 📊 {sel} — {PERIYOT}")
-                fig = grafik_ciz(sel, match["df"], match["sinyaller"], PERIYOT)
-                st.plotly_chart(fig, use_container_width=True, config=GRAFIK_CONFIG)
+else:
+    # ── GRAFİK ─────────────────────────────────────────────
+    _g1, _g2 = st.columns([1, 4])
+    with _g1:
+        if st.button("← Screener", use_container_width=True):
+            st.session_state.grafik_gosteriliyor = False
+            st.session_state.selected_symbol     = None
+            st.rerun()
+    with _g2:
+        _secili_list = SEMBOLLER if SEMBOLLER else ["BTC/USDT"]
+        _default_idx = 0
+        if st.session_state.selected_symbol in _secili_list:
+            _default_idx = _secili_list.index(st.session_state.selected_symbol)
+        secili = st.selectbox("Sembol", _secili_list, index=_default_idx,
+                              label_visibility="collapsed")
 
-# ── TAB 2: GRAFİK ──────────────────────────────────────────
-with tab2:
-    secili_list = SEMBOLLER if SEMBOLLER else ["BTC/USDT"]
-    secili = st.selectbox("Sembol seç", secili_list)
+    with st.spinner(f"{secili} verisi çekiliyor..."):
+        try:
+            df     = veri_cek(secili, PERIYOT, LIMIT)
+            db_sin = double_bottom_tespit(df)
+            lq_sin = likidite_alimi_tespit(df)
+            dt_sin = double_top_tespit(df)
 
-    if st.session_state.grafik_gosteriliyor:
-        with st.spinner(f"{secili} verisi çekiliyor..."):
-            try:
-                df     = veri_cek(secili, PERIYOT, LIMIT)
-                db_sin = double_bottom_tespit(df)
-                lq_sin = likidite_alimi_tespit(df)
-                dt_sin = double_top_tespit(df)
+            if PATTERN_MOD == "Likidite Alımı":
+                sinyaller = lq_sin
+            elif PATTERN_MOD == "Hepsi":
+                sinyaller = db_sin + lq_sin + dt_sin
+            else:
+                sinyaller = db_sin + dt_sin
 
-                if PATTERN_MOD == "Likidite Alımı":
-                    sinyaller = lq_sin
-                elif PATTERN_MOD == "Hepsi":
-                    sinyaller = db_sin + lq_sin + dt_sin
-                else:  # DB + DT
-                    sinyaller = db_sin + dt_sin
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Toplam Bar",     len(df))
+            c2.metric("Double Bottom",  len(db_sin))
+            c3.metric("Likidite Alımı", len(lq_sin))
+            c4.metric("Double Top",     len(dt_sin))
 
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("Toplam Bar",     len(df))
-                c2.metric("Double Bottom",  len(db_sin))
-                c3.metric("Likidite Alımı", len(lq_sin))
-                c4.metric("Double Top",     len(dt_sin))
-
-                fig = grafik_ciz(secili, df, sinyaller, PERIYOT)
-                st.plotly_chart(fig, use_container_width=True, config=GRAFIK_CONFIG)
-            except Exception as e:
-                st.error(f"Hata: {e}")
-    else:
-        st.info("Yukarıdan periyot seçip **📊 Grafiği Göster** butonuna tıklayın.")
+            fig = grafik_ciz(secili, df, sinyaller, PERIYOT)
+            st.plotly_chart(fig, use_container_width=True, config=GRAFIK_CONFIG)
+        except Exception as e:
+            st.error(f"Hata: {e}")
