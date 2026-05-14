@@ -14,7 +14,6 @@ st.set_page_config(page_title="Wyckoff Screener", layout="wide", page_icon="📈
 st.markdown("""
 <style>
 [data-testid="stStatusWidget"]                { display: none !important; }
-[data-testid="stToolbar"]                    { display: none !important; }
 #MainMenu                                    { display: none !important; }
 .stAppDeployButton                           { display: none !important; }
 
