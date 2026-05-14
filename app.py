@@ -12,11 +12,15 @@ st.set_page_config(page_title="Wyckoff Screener", layout="wide", page_icon="📈
 # ─── CSS ───────────────────────────────────────────────────
 st.markdown("""
 <style>
-[data-testid="stStatusWidget"]       { display: none !important; }
-[data-testid="stToolbar"]            { display: none !important; }
-#MainMenu                            { display: none !important; }
+[data-testid="stStatusWidget"]                { display: none !important; }
+[data-testid="stToolbar"]                    { display: none !important; }
+#MainMenu                                    { display: none !important; }
+.stAppDeployButton                           { display: none !important; }
 
-.stAppDeployButton                   { display: none !important; }
+/* Sidebar aç/kapat butonu her zaman görünür */
+[data-testid="collapsedControl"]             { display: flex !important; }
+[data-testid="stSidebarCollapseButton"]      { display: flex !important; }
+section[data-testid="stSidebarCollapsedControl"] { display: flex !important; }
 
 @keyframes slideRight {
     0%   { left: -30px; }
