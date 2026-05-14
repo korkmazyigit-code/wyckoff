@@ -465,13 +465,9 @@ def double_top_tespit(df):
             if rise_pct < MIN_TREND_DROP:
                 continue
 
-            # T2 wick T1 high üstüne çıkmalı
-            if highs[t2] <= highs[t1]:
-                continue
-
-            # T2 ±2 pencerede en az bir close T1 high üstünde kapanmalı
-            w_start = max(0, t2 - 2)
-            w_end   = min(n, t2 + 3)
+            # T2 ±3 pencerede en az bir close T1 high üstünde kapanmalı
+            w_start = max(0, t2 - 3)
+            w_end   = min(n, t2 + 4)
             if not any(closes[j] > highs[t1] for j in range(w_start, w_end)):
                 continue
 
@@ -490,6 +486,48 @@ def double_top_tespit(df):
                 continue
 
             candidates.append((t1, neckline, neckline_idx))
+
+        # window=1 ile bulunan ek yerel zirveler de T1 adayı olabilir
+        # (PIVOT_WINDOW'da pivot sayılmayan ama gerçek zirve olan barları yakalar)
+        loose_pivot_idx = _pivot_highs(highs, 1)
+        existing_t1s = {c[0] for c in candidates}
+        for t1_l in loose_pivot_idx:
+            if t1_l in existing_t1s:
+                continue
+            if t2 - t1_l > MAX_BARS_BETWEEN:
+                continue
+            if t2 - t1_l < PIVOT_WINDOW * 2:
+                continue
+
+            ts_l = max(0, t1_l - TREND_LOOKBACK)
+            recent_pl_l = [p for p in pivot_low_idx if ts_l <= p < t1_l]
+            if not recent_pl_l:
+                continue
+            prior_low_l = float(lows[recent_pl_l[-1]])
+            if prior_low_l == 0:
+                continue
+            if (highs[t1_l] - prior_low_l) / prior_low_l * 100 < MIN_TREND_DROP:
+                continue
+
+            # T2 ±3 pencerede en az bir close T1 high üstünde kapanmalı
+            w_start_l = max(0, t2 - 3)
+            w_end_l   = min(n, t2 + 4)
+            if not any(closes[j] > highs[t1_l] for j in range(w_start_l, w_end_l)):
+                continue
+
+            ara_l = [p for p in pivot_idx if t1_l < p < t2]
+            if any(highs[p] > highs[t1_l] for p in ara_l):
+                continue
+
+            nk_l = lows[t1_l + 1: t2]
+            if len(nk_l) == 0:
+                continue
+            neckline_l     = float(np.min(nk_l))
+            neckline_idx_l = int(np.argmin(lows[t1_l + 1: t2])) + t1_l + 1
+            if neckline_l > highs[t1_l] * (1 - MIN_NECKLINE_PCT / 100):
+                continue
+
+            candidates.append((t1_l, neckline_l, neckline_idx_l))
 
         if not candidates:
             continue
